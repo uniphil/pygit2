@@ -49,9 +49,6 @@
 set -x # Print every command and variable
 set -e # Exit script on any command failure
 
-# Arguments
-WHAT=${1:-inplace}
-
 # Variables
 PYTHON=${PYTHON:-python3}
 PYTHON_VERSION=$($PYTHON -c "import platform; print(f'{platform.python_implementation()}-{platform.python_version()}')")
@@ -74,15 +71,26 @@ esac
 $PYTHON -m venv $PREFIX
 cd ci
 
+# Install zlib
+if [ -n "$ZLIB_VERSION" ]; then
+    FILENAME=zlib-$ZLIB_VERSION
+    wget https://www.zlib.net/$FILENAME.tar.gz -N
+    tar xf $FILENAME.tar.gz
+    cd $FILENAME
+    ./configure --prefix=$PREFIX
+    make
+    make install
+    cd ..
+fi
+
 # Install libssh2
 if [ -n "$LIBSSH2_VERSION" ]; then
     FILENAME=libssh2-$LIBSSH2_VERSION
     wget https://www.libssh2.org/download/$FILENAME.tar.gz -N
     tar xf $FILENAME.tar.gz
     cd $FILENAME
-    ./configure --prefix=$PREFIX --disable-static
-    make
-    make install
+    cmake . -DCMAKE_INSTALL_PREFIX=$PREFIX -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=ON
+    cmake --build . --target install
     cd ..
     $LDD $PREFIX/lib/libssh2.$SOEXT
     LIBSSH2_PREFIX=$PREFIX
@@ -104,9 +112,11 @@ fi
 # Build pygit2
 cd ..
 $PREFIX/bin/pip install -U pip
-if [ $WHAT = "wheel" ]; then
+if [ "$1" = "wheel" ]; then
+    shift
     $PREFIX/bin/pip install wheel
     $PREFIX/bin/python setup.py bdist_wheel
+    $PREFIX/bin/pip install dist/pygit2-*.whl
 else
     # Install Python requirements & build inplace
     $PREFIX/bin/python setup.py egg_info
@@ -115,7 +125,7 @@ else
 fi
 
 # Tests
-if [ $WHAT = "test" ]; then
+if [ "$1" = "test" ]; then
     $PREFIX/bin/pip install -r requirements-test.txt
     $PREFIX/bin/pytest --cov=pygit2
 fi

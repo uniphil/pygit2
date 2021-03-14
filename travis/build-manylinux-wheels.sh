@@ -1,19 +1,11 @@
 #!/usr/bin/env bash
-if [ -n "$DEBUG" ]
-then
-  set -x
-fi
 
-DIST_NAME="$1"
-LIBGIT2_VERSION="$2"
+set -x
+set -e
+
+LIBGIT2_VERSION="$1"
 
 set -euo pipefail
-
-if [ -z "$DIST_NAME" ]
-then
-    >&2 echo "Please pass package name as a first argument of this script ($0)"
-    exit 1
-fi
 
 if [ -z "$LIBGIT2_VERSION" ]
 then
@@ -28,9 +20,7 @@ PYTHONS="cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39"
 export PYTHONDONTWRITEBYTECODE=1
 
 SRC_DIR=/io
-GIT_GLOBAL_ARGS="--git-dir=${SRC_DIR}/.git --work-tree=${SRC_DIR}"
-TESTS_SRC_DIR="${SRC_DIR}/test"
-BUILD_DIR=`mktemp -d "/tmp/${DIST_NAME}-manylinux2014-build.XXXXXXXXXX"`
+BUILD_DIR=`mktemp -d "/tmp/pygit2-manylinux2014-build.XXXXXXXXXX"`
 TESTS_DIR="${BUILD_DIR}/test"
 STATIC_DEPS_PREFIX="${BUILD_DIR}/static-deps"
 LIBGIT2_CLONE_DIR="${BUILD_DIR}/libgit2"
@@ -52,27 +42,17 @@ function cleanup_garbage() {
     # clear python cache
     >&2 echo
     >&2 echo
-    >&2 echo ===========================================
-    >&2 echo Cleaning up python bytecode cache files...
-    >&2 echo ===========================================
+    >&2 echo === Clean up python bytecode cache files ===
     >&2 echo
-    find "${SRC_DIR}" \
-        -type f \
-        -name *.pyc -o -name *.pyo \
-        -print0 | xargs -0 rm -fv
-    find "${SRC_DIR}" \
-        -type d \
-        -name __pycache__ \
-        -print0 | xargs -0 rm -rfv
+    find "${SRC_DIR}" -type f -name *.pyc -o -name *.pyo -print0 | xargs -0 rm -fv
+    find "${SRC_DIR}" -type d -name __pycache__ -print0 | xargs -0 rm -rfv
 
     # clear python cache
     >&2 echo
     >&2 echo
-    >&2 echo ======================================
-    >&2 echo Cleaning up files untracked by Git...
-    >&2 echo ======================================
+    >&2 echo === Clean up files untracked by Git ===
     >&2 echo
-    git ${GIT_GLOBAL_ARGS} clean -fxd --exclude dist/
+    git --git-dir=${SRC_DIR}/.git --work-tree=${SRC_DIR} clean -fxd --exclude dist/
 }
 
 cleanup_garbage
@@ -111,13 +91,10 @@ yum -y install git libffi-devel cmake3
 >&2 echo downloading source of zlib v${ZLIB_VERSION}:
 >&2 echo ============================================
 >&2 echo
-curl https://www.zlib.net/zlib-${ZLIB_VERSION}.tar.gz | \
-    tar xzvC "${BUILD_DIR}" -f -
+curl https://www.zlib.net/zlib-${ZLIB_VERSION}.tar.gz | tar xzvC "${BUILD_DIR}" -f -
 
 pushd "${ZLIB_DOWNLOAD_DIR}"
-./configure \
-    --static \
-    --prefix="${STATIC_DEPS_PREFIX}" && \
+./configure --static --prefix="${STATIC_DEPS_PREFIX}" && \
     make -j9 libz.a && \
     make install
 popd
@@ -184,7 +161,7 @@ popd
 for PY in $PYTHONS; do
     PIP_BIN="/opt/python/${PY}/bin/pip"
     cleanup_garbage
-    >&2 echo Using "${PIP_BIN}"...
+    # XXX pygit2 is built here
     ${PIP_BIN} wheel "${SRC_DIR}" -w "${ORIG_WHEEL_DIR}"
 done
 
@@ -196,7 +173,7 @@ done
 >&2 echo
 # Bundle external shared libraries into the wheels
 for PY in $PYTHONS; do
-    for whl in ${ORIG_WHEEL_DIR}/${DIST_NAME}-*-${PY}-linux_${ARCH}.whl; do
+    for whl in ${ORIG_WHEEL_DIR}/pygit2-*-${PY}-linux_${ARCH}.whl; do
         cleanup_garbage
         >&2 echo Reparing "${whl}"...
         auditwheel repair "${whl}" -w ${WHEELHOUSE_DIR}
@@ -212,7 +189,7 @@ done
 >&2 echo
 for PY in $PYTHONS; do
     PIP_BIN="/opt/python/${PY}/bin/pip"
-    WHEEL_FILE=`ls ${WHEELHOUSE_DIR}/${DIST_NAME}-*-${PY}-manylinux2014_${ARCH}.whl`
+    WHEEL_FILE=`ls ${WHEELHOUSE_DIR}/pygit2-*-${PY}-manylinux2014_${ARCH}.whl`
     cleanup_garbage
     >&2 echo Downloading ${WHEEL_FILE} deps using ${PIP_BIN}...
     ${PIP_BIN} download -d "${WHEEL_DEP_DIR}" "${WHEEL_FILE}"
@@ -229,7 +206,7 @@ for PY in $PYTHONS; do
     PIP_BIN="/opt/python/${PY}/bin/pip"
     cleanup_garbage
     >&2 echo Using ${PIP_BIN}...
-    ${PIP_BIN} install --no-compile "${DIST_NAME}" --no-index -f ${WHEEL_DEP_DIR} #&
+    ${PIP_BIN} install --no-compile "pygit2" --no-index -f ${WHEEL_DEP_DIR} #&
 done
 wait
 
@@ -262,10 +239,10 @@ cleanup_garbage
 >&2 echo
 for PY in $PYTHONS; do
     WHEEL_BIN="/opt/python/${PY}/bin/wheel"
-    WHEEL_FILE=`ls ${WHEELHOUSE_DIR}/${DIST_NAME}-*-${PY}-manylinux2014_${ARCH}.whl`
+    WHEEL_FILE=`ls ${WHEELHOUSE_DIR}/pygit2-*-${PY}-manylinux2014_${ARCH}.whl`
     >&2 echo Analysing ${WHEEL_FILE}...
     auditwheel show "${WHEEL_FILE}"
-    ${WHEEL_BIN} unpack -d "${BUILD_DIR}/${PY}-${DIST_NAME}" "${WHEEL_FILE}"
+    ${WHEEL_BIN} unpack -d "${BUILD_DIR}/${PY}-pygit2" "${WHEEL_FILE}"
 done
 
 >&2 echo
@@ -275,7 +252,7 @@ done
 >&2 echo ==================================
 >&2 echo
 cp -v ${SRC_DIR}/pytest.ini ${BUILD_DIR}/
-cp -vr ${TESTS_SRC_DIR} ${TESTS_DIR}
+cp -vr ${SRC_DIR}/test ${TESTS_DIR}
 pushd "${BUILD_DIR}"
 for PY in $PYTHONS; do
     PY_BIN="/opt/python/${PY}/bin/python"
@@ -296,5 +273,5 @@ popd
 cleanup_garbage
 
 chown -R --reference="${SRC_DIR}/.travis.yml" "${SRC_DIR}"
->&2 echo Final OS-specific wheels for ${DIST_NAME}:
+>&2 echo Final OS-specific wheels for pygit2:
 ls -l ${WHEELHOUSE_DIR}
